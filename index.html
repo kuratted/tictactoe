@@ -187,7 +187,7 @@ var $ = function(id){ return document.getElementById(id); };
 var PREFIX = "muse-ttt-v1-";
 var WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
-var peer = null, conn = null, connOpen = false, joinTimer = null;
+var peer = null, conn = null, connOpen = false, joinTimer = null, joinAttempts = 0;
 var myName = "Player", oppName = "Opponent";
 var amHost = false, myMark = "X", oppMark = "O";
 var board = ["","","","","","","","",""];
@@ -324,6 +324,7 @@ function wireConn(c){
   conn = c;
   conn.on("open", function(){
     if (joinTimer){ clearTimeout(joinTimer); joinTimer = null; }
+  joinAttempts = 0;
     connOpen = true;
     try{ conn.send({ t:"hello", name: myName }); }catch(e){}
     enterGame();
@@ -363,6 +364,7 @@ function leaveGame(){
   try{ if (peer) peer.destroy(); }catch(e){}
   peer = null; conn = null; connOpen = false;
   if (joinTimer){ clearTimeout(joinTimer); joinTimer = null; }
+  joinAttempts = 0;
   showView("view-lobby");
   $("lobby-err").textContent = ""; $("wait-err").textContent = "";
 }
@@ -401,17 +403,29 @@ function joinRoom(){
   showView("view-wait");
   peer = new Peer();
   peer.on("open", function(){
-    var c = peer.connect(PREFIX + code, { reliable: true });
-    joinTimer = setTimeout(function(){
-      if (!connOpen){
-        $("wait-err").textContent = "No answer — is the room still open? Double-check the code.";
-        try{ peer.destroy(); }catch(e){}
-      }
-    }, 15000);
-    wireConn(c);
+    joinAttempts = 0;
+    tryJoin(code);
   });
   peer.on("disconnected", function(){ try{ peer.reconnect(); }catch(e){} });
   peer.on("error", peerError);
+}
+function tryJoin(code){
+  // the free relay server sometimes drops the first handshake, so retry a few times
+  joinAttempts++;
+  var c = peer.connect(PREFIX + code, { reliable: true });
+  wireConn(c);
+  joinTimer = setTimeout(function(){
+    if (!connOpen){
+      if (joinAttempts < 3){
+        $("wait-note").textContent = "Still connecting… retrying (attempt " + (joinAttempts + 1) + " of 3)";
+        try{ c.close(); }catch(e){}
+        tryJoin(code);
+      } else {
+        $("wait-err").textContent = "No answer — is the room still open? Double-check the code.";
+        try{ peer.destroy(); }catch(e){}
+      }
+    }
+  }, 8000);
 }
 function sendChat(){
   var v = $("chat-input").value.trim();
