@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Tic-Tac-Toe + Chat — play live with a friend</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg:#0b1020; --card:#141b33; --card2:#1a2342; --line:#2a3560;
+    --txt:#eef1ff; --dim:#9aa3c7;
+    --x:#38e1ff; --o:#ff6b9d; --acc:#7c6bff; --good:#3ddc84; --bad:#ff5d5d;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; color:var(--txt);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;
+    background:radial-gradient(1100px 550px at 20% -10%,#1b2450 0%,var(--bg) 55%),var(--bg);
+    display:flex; flex-direction:column; align-items:center; padding:24px 16px 48px;
+  }
+  header{text-align:center; margin-bottom:18px}
+  header h1{margin:0; font-size:clamp(26px,5vw,38px); letter-spacing:.5px}
+  header h1 .xo-x{color:var(--x)} header h1 .xo-o{color:var(--o)}
+  header p{margin:6px 0 0; color:var(--dim); font-size:14px}
+  .card{
+    background:linear-gradient(180deg,var(--card2),var(--card));
+    border:1px solid var(--line); border-radius:18px;
+    padding:22px; width:100%; max-width:440px;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+  }
+  .card.wide{max-width:920px}
+  .view{display:none} .view.active{display:block}
+  label{display:block; font-size:13px; color:var(--dim); margin:0 0 6px}
+  input[type=text]{
+    width:100%; padding:12px 14px; border-radius:12px; font-size:16px;
+    background:#0e1430; border:1px solid var(--line); color:var(--txt); outline:none;
+  }
+  input[type=text]:focus{border-color:var(--acc)}
+  .btn{
+    display:inline-block; border:0; cursor:pointer; font-weight:700; font-size:15px;
+    padding:12px 18px; border-radius:12px; color:#fff;
+    background:linear-gradient(135deg,var(--acc),#4f8dff);
+    transition:transform .08s ease, filter .15s ease; width:100%;
+  }
+  .btn:hover{filter:brightness(1.1)} .btn:active{transform:scale(.97)}
+  .btn.ghost{background:#0e1430; border:1px solid var(--line); color:var(--txt)}
+  .btn.small{width:auto; padding:8px 14px; font-size:13px}
+  .row{display:flex; gap:10px} .row>*{flex:1}
+  .divider{display:flex; align-items:center; gap:10px; color:var(--dim); font-size:12px; margin:16px 0}
+  .divider::before,.divider::after{content:""; height:1px; background:var(--line); flex:1}
+  .err{color:var(--bad); font-size:13px; min-height:18px; margin:8px 0 0}
+  .code-box{
+    text-align:center; background:#0e1430; border:1px dashed var(--acc);
+    border-radius:14px; padding:16px; margin:14px 0;
+  }
+  .code-box .code{font-size:34px; font-weight:800; letter-spacing:8px; color:#fff}
+  .spinner{
+    width:34px; height:34px; margin:14px auto; border-radius:50%;
+    border:4px solid var(--line); border-top-color:var(--acc);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .center{text-align:center} .dim{color:var(--dim); font-size:14px}
+
+  /* game layout */
+  .game-grid{display:grid; grid-template-columns:1fr; gap:18px}
+  @media(min-width:860px){ .game-grid{grid-template-columns:1fr 320px} }
+  .scorebar{display:flex; gap:10px; margin-bottom:14px}
+  .score{flex:1; background:#0e1430; border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center}
+  .score .n{font-size:22px; font-weight:800}
+  .score .who{font-size:12px; color:var(--dim)}
+  .status{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    background:#0e1430; border:1px solid var(--line); border-radius:12px;
+    padding:10px; font-weight:700; margin-bottom:14px; min-height:46px;
+  }
+  .dot{width:10px; height:10px; border-radius:50%; background:var(--dim)}
+  .dot.yours{background:var(--good); animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  #board{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:420px; margin:0 auto; width:100%}
+  .cell{
+    aspect-ratio:1; border-radius:16px; border:1px solid var(--line);
+    background:#0e1430; color:#fff; font-size:clamp(44px,12vw,72px); font-weight:800;
+    cursor:pointer; transition:transform .06s ease, background .15s ease;
+    display:flex; align-items:center; justify-content:center; font-family:inherit;
+  }
+  .cell:not(:disabled):hover{background:#16204a}
+  .cell:active{transform:scale(.96)}
+  .cell.x{color:var(--x); text-shadow:0 0 18px rgba(56,225,255,.5)}
+  .cell.o{color:var(--o); text-shadow:0 0 18px rgba(255,107,157,.5)}
+  .cell.win{background:linear-gradient(135deg,rgba(124,107,255,.35),rgba(79,141,255,.35)); border-color:var(--acc)}
+  .cell.pop{animation:pop .18s ease}
+  @keyframes pop{50%{transform:scale(1.12)}}
+  .controls{display:flex; gap:10px; margin-top:14px}
+
+  /* chat */
+  .chat-card{display:flex; flex-direction:column; min-height:420px}
+  .chat-card h3{margin:0 0 10px; font-size:15px}
+  #chat-log{
+    flex:1; overflow-y:auto; background:#0e1430; border:1px solid var(--line);
+    border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:8px;
+    min-height:260px; max-height:420px;
+  }
+  .msg{max-width:85%; padding:8px 12px; border-radius:14px; font-size:14px; line-height:1.4; word-wrap:break-word}
+  .msg .who{display:block; font-size:11px; opacity:.7; margin-bottom:2px}
+  .msg.me{align-self:flex-end; background:linear-gradient(135deg,var(--acc),#4f8dff); color:#fff; border-bottom-right-radius:4px}
+  .msg.them{align-self:flex-start; background:#232c55; border-bottom-left-radius:4px}
+  .msg.sys{align-self:center; background:transparent; color:var(--dim); font-size:12px; font-style:italic; max-width:100%}
+  .chat-input-row{display:flex; gap:8px; margin-top:10px}
+  .chat-input-row input{flex:1}
+  .chat-input-row .btn{width:auto}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tic <span class="xo-x">X</span> Tac <span class="xo-o">O</span> <span style="font-size:.6em;vertical-align:middle">+ chat</span></h1>
+  <p>Play live with a friend — no sign-up, just share a room code.</p>
+</header>
+
+<!-- LOBBY -->
+<div class="card view active" id="view-lobby">
+  <label for="name-input">Your display name</label>
+  <input type="text" id="name-input" maxlength="20" placeholder="e.g. Kunal" autocomplete="off"/>
+  <div style="height:14px"></div>
+  <button class="btn" id="btn-create">Create a room</button>
+  <div class="divider">or</div>
+  <label for="join-code">Join with a room code</label>
+  <div class="row">
+    <input type="text" id="join-code" maxlength="6" placeholder="ABC123" autocomplete="off"
+           style="text-transform:uppercase; letter-spacing:3px; font-weight:700; text-align:center"/>
+    <button class="btn" id="btn-join" style="flex:0 0 110px">Join</button>
+  </div>
+  <p class="err" id="lobby-err"></p>
+  <p class="dim center" style="margin-top:10px">Rooms are peer-to-peer: whoever creates the room plays <b style="color:var(--x)">X</b> and moves first.</p>
+</div>
+
+<!-- WAITING -->
+<div class="card view" id="view-wait">
+  <h3 class="center" id="wait-title" style="margin:0 0 4px">Your room is ready</h3>
+  <div id="wait-code-row">
+    <p class="dim center">Share this code with your friend:</p>
+    <div class="code-box">
+      <div class="code" id="room-code">------</div>
+      <div style="height:10px"></div>
+      <button class="btn ghost small" id="btn-copy">Copy code</button>
+    </div>
+  </div>
+  <div class="spinner" id="wait-spinner"></div>
+  <p class="dim center" id="wait-note">Waiting for your opponent to join…</p>
+  <p class="err center" id="wait-err"></p>
+  <div style="height:8px"></div>
+  <button class="btn ghost" id="btn-leave-wait">Cancel</button>
+</div>
+
+<!-- GAME -->
+<div class="card wide view" id="view-game">
+  <div class="game-grid">
+    <div>
+      <div class="scorebar">
+        <div class="score"><div class="n" id="score-you" style="color:var(--x)">0</div><div class="who" id="name-you">You (X)</div></div>
+        <div class="score"><div class="n" id="score-draws">0</div><div class="who">Draws</div></div>
+        <div class="score"><div class="n" id="score-opp" style="color:var(--o)">0</div><div class="who" id="name-opp">Opponent (O)</div></div>
+      </div>
+      <div class="status"><span class="dot" id="status-dot"></span><span id="status-text">Connecting…</span></div>
+      <div id="board"></div>
+      <div class="controls">
+        <button class="btn" id="btn-newround">New round</button>
+        <button class="btn ghost" id="btn-leave">Leave</button>
+      </div>
+    </div>
+    <div class="card chat-card" style="max-width:none">
+      <h3>💬 Chat</h3>
+      <div id="chat-log"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" maxlength="500" placeholder="Say something…" autocomplete="off"/>
+        <button class="btn" id="btn-send">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var $ = function(id){ return document.getElementById(id); };
+var PREFIX = "muse-ttt-v1-";
+var WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+var peer = null, conn = null, connOpen = false, joinTimer = null;
+var myName = "Player", oppName = "Opponent";
+var amHost = false, myMark = "X", oppMark = "O";
+var board = ["","","","","","","","",""];
+var turn = "X", starter = "X", gameOver = false;
+var scores = { X:0, O:0, D:0 };
+
+/* ---------- helpers ---------- */
+function showView(id){
+  ["view-lobby","view-wait","view-game"].forEach(function(v){
+    $(v).classList.toggle("active", v === id);
+  });
+}
+function genCode(){
+  var c = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", s = "";
+  for (var i = 0; i < 6; i++) s += c.charAt(Math.floor(Math.random() * c.length));
+  return s;
+}
+function beep(freq, dur){
+  try{
+    var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }catch(e){ /* audio unavailable — fine */ }
+}
+function setStatus(text, yours){
+  $("status-text").textContent = text;
+  $("status-dot").className = "dot" + (yours ? " yours" : "");
+}
+function addMsg(who, text, mine, sys){
+  var log = $("chat-log"), d = document.createElement("div");
+  d.className = "msg " + (sys ? "sys" : (mine ? "me" : "them"));
+  if (sys){ d.textContent = text; }
+  else{
+    var w = document.createElement("span"); w.className = "who"; w.textContent = who;
+    d.appendChild(w); d.appendChild(document.createTextNode(text));
+  }
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+function sysMsg(t){ addMsg("", t, false, true); }
+
+/* ---------- board ---------- */
+function buildBoard(){
+  var b = $("board"); b.innerHTML = "";
+  for (var i = 0; i < 9; i++){
+    (function(i){
+      var btn = document.createElement("button");
+      btn.className = "cell"; btn.id = "cell-" + i;
+      btn.setAttribute("aria-label", "cell " + (i + 1));
+      btn.addEventListener("click", function(){ cellClick(i); });
+      b.appendChild(btn);
+    })(i);
+  }
+}
+function renderBoard(){
+  for (var i = 0; i < 9; i++){
+    var c = $("cell-" + i);
+    c.textContent = board[i];
+    c.className = "cell" + (board[i] === "X" ? " x" : board[i] === "O" ? " o" : "");
+  }
+}
+function winner(){
+  for (var k = 0; k < WINS.length; k++){
+    var w = WINS[k], a = board[w[0]];
+    if (a && a === board[w[1]] && a === board[w[2]]) return { mark: a, line: w };
+  }
+  return null;
+}
+function highlight(line){
+  line.forEach(function(i){ $("cell-" + i).classList.add("win"); });
+}
+function renderScores(){
+  $("score-you").textContent = scores[myMark];
+  $("score-opp").textContent = scores[oppMark];
+  $("score-draws").textContent = scores.D;
+}
+function renderNames(){
+  $("name-you").textContent = myName + " (" + myMark + ")";
+  $("name-opp").textContent = oppName + " (" + oppMark + ")";
+}
+function cellClick(i){
+  if (!connOpen || gameOver || turn !== myMark || board[i]) return;
+  board[i] = myMark;
+  var c = $("cell-" + i); c.classList.add("pop");
+  setTimeout(function(){ c.classList.remove("pop"); }, 200);
+  try{ conn.send({ t:"move", i:i }); }catch(e){}
+  beep(520, 0.08);
+  afterMove();
+}
+function remoteMove(i){
+  if (gameOver || typeof i !== "number" || i < 0 || i > 8 || board[i]) return;
+  board[i] = oppMark;
+  beep(390, 0.08);
+  afterMove();
+}
+function afterMove(){
+  renderBoard();
+  var w = winner();
+  if (w){
+    gameOver = true; scores[w.mark]++; highlight(w.line); renderScores();
+    if (w.mark === myMark){ setStatus("You win! 🎉", false); beep(660,0.12); setTimeout(function(){beep(880,0.18);},130); }
+    else setStatus(oppName + " wins this round", false);
+  } else if (board.every(function(v){ return v; })){
+    gameOver = true; scores.D++; renderScores();
+    setStatus("It's a draw!", false);
+  } else {
+    turn = (turn === "X") ? "O" : "X";
+    setStatus(turn === myMark ? "Your turn" : oppName + "'s turn…", turn === myMark);
+  }
+}
+function startRound(broadcast){
+  board = ["","","","","","","","",""];
+  gameOver = false;
+  starter = (starter === "X") ? "O" : "X";
+  turn = starter;
+  renderBoard(); renderScores();
+  setStatus(turn === myMark ? "Your turn" : oppName + "'s turn…", turn === myMark);
+  if (broadcast && connOpen){ try{ conn.send({ t:"newround" }); }catch(e){} }
+}
+
+/* ---------- net ---------- */
+function peerError(e){
+  var msg = "Connection error. Please try again.";
+  if (e && e.type === "peer-unavailable") msg = "Room not found — check the code and try again.";
+  else if (e && (e.type === "network" || e.type === "server-error" || e.type === "socket-error"))
+    msg = "Network hiccup — check your connection and retry.";
+  if ($("view-wait").classList.contains("active")) $("wait-err").textContent = msg;
+  else $("lobby-err").textContent = msg;
+}
+function wireConn(c){
+  conn = c;
+  conn.on("open", function(){
+    if (joinTimer){ clearTimeout(joinTimer); joinTimer = null; }
+    connOpen = true;
+    try{ conn.send({ t:"hello", name: myName }); }catch(e){}
+    enterGame();
+    sysMsg("Connected. Say hi! 👋");
+  });
+  conn.on("data", onData);
+  conn.on("close", oppGone);
+  conn.on("error", function(){});
+}
+function onData(d){
+  if (!d || !d.t) return;
+  if (d.t === "hello"){
+    oppName = String(d.name || "Opponent").slice(0, 20);
+    renderNames(); sysMsg(oppName + " joined the game.");
+  }
+  else if (d.t === "move"){ remoteMove(d.i); }
+  else if (d.t === "chat"){ addMsg(oppName, String(d.text).slice(0, 500), false); beep(700, 0.06); }
+  else if (d.t === "newround"){ startRound(false); sysMsg(oppName + " started a new round."); }
+}
+function oppGone(){
+  connOpen = false;
+  setStatus("Opponent left the game.", false);
+  sysMsg("Opponent disconnected.");
+  $("chat-input").disabled = true;
+}
+function enterGame(){
+  showView("view-game");
+  $("chat-log").innerHTML = "";
+  $("chat-input").disabled = false;
+  board = ["","","","","","","","",""];
+  gameOver = false; starter = "X"; turn = "X";
+  renderBoard(); renderScores(); renderNames();
+  setStatus(turn === myMark ? "Your turn" : oppName + "'s turn…", turn === myMark);
+}
+function leaveGame(){
+  try{ if (conn) conn.close(); }catch(e){}
+  try{ if (peer) peer.destroy(); }catch(e){}
+  peer = null; conn = null; connOpen = false;
+  if (joinTimer){ clearTimeout(joinTimer); joinTimer = null; }
+  showView("view-lobby");
+  $("lobby-err").textContent = ""; $("wait-err").textContent = "";
+}
+
+/* ---------- ui wiring ---------- */
+function createRoom(){
+  $("lobby-err").textContent = "";
+  myName = ($("name-input").value.trim() || "Player 1").slice(0, 20);
+  amHost = true; myMark = "X"; oppMark = "O";
+  var code = genCode();
+  $("room-code").textContent = code;
+  $("wait-title").textContent = "Your room is ready";
+  $("wait-code-row").style.display = "";
+  $("wait-note").textContent = "Waiting for your opponent to join…";
+  $("wait-err").textContent = "";
+  showView("view-wait");
+  peer = new Peer(PREFIX + code);
+  peer.on("open", function(){ $("wait-note").textContent = "Room is live — waiting for your opponent…"; });
+  peer.on("connection", function(c){
+    if (conn){ try{ c.close(); }catch(e){} return; } // one opponent only
+    wireConn(c);
+  });
+  peer.on("disconnected", function(){ try{ peer.reconnect(); }catch(e){} });
+  peer.on("error", peerError);
+}
+function joinRoom(){
+  $("lobby-err").textContent = "";
+  var code = $("join-code").value.trim().toUpperCase();
+  if (code.length < 4){ $("lobby-err").textContent = "Enter the room code your friend shared."; return; }
+  myName = ($("name-input").value.trim() || "Player 2").slice(0, 20);
+  amHost = false; myMark = "O"; oppMark = "X";
+  $("wait-title").textContent = "Joining room " + code;
+  $("wait-code-row").style.display = "none";
+  $("wait-note").textContent = "Connecting to your opponent…";
+  $("wait-err").textContent = "";
+  showView("view-wait");
+  peer = new Peer();
+  peer.on("open", function(){
+    var c = peer.connect(PREFIX + code, { reliable: true });
+    joinTimer = setTimeout(function(){
+      if (!connOpen){
+        $("wait-err").textContent = "No answer — is the room still open? Double-check the code.";
+        try{ peer.destroy(); }catch(e){}
+      }
+    }, 15000);
+    wireConn(c);
+  });
+  peer.on("disconnected", function(){ try{ peer.reconnect(); }catch(e){} });
+  peer.on("error", peerError);
+}
+function sendChat(){
+  var v = $("chat-input").value.trim();
+  if (!v) return;
+  if (connOpen){ try{ conn.send({ t:"chat", text: v }); }catch(e){} }
+  addMsg(myName, v, true);
+  $("chat-input").value = "";
+}
+
+$("btn-create").addEventListener("click", createRoom);
+$("btn-join").addEventListener("click", joinRoom);
+$("join-code").addEventListener("keydown", function(e){ if (e.key === "Enter") joinRoom(); });
+$("name-input").addEventListener("keydown", function(e){ if (e.key === "Enter") createRoom(); });
+$("btn-copy").addEventListener("click", function(){
+  var code = $("room-code").textContent;
+  function done(){ $("btn-copy").textContent = "Copied!"; setTimeout(function(){ $("btn-copy").textContent = "Copy code"; }, 1500); }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(code).then(done, done);
+  } else {
+    var ta = document.createElement("textarea");
+    ta.value = code; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); }catch(e){}
+    document.body.removeChild(ta); done();
+  }
+});
+$("btn-leave-wait").addEventListener("click", leaveGame);
+$("btn-leave").addEventListener("click", leaveGame);
+$("btn-newround").addEventListener("click", function(){ startRound(true); sysMsg("New round started."); });
+$("btn-send").addEventListener("click", sendChat);
+$("chat-input").addEventListener("keydown", function(e){ if (e.key === "Enter") sendChat(); });
+buildBoard();
+})();
+</script>
+</body>
+</html>
